@@ -8,6 +8,11 @@ from datetime import datetime
 import subprocess
 import io
 import os
+import logging
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 
@@ -30,10 +35,12 @@ def run_scraper(establishment_type, location, max_results):
     global search_results, search_status
     
     try:
+        logging.info("Iniciando run_scraper...")
         search_status["is_running"] = True
         search_status["progress"] = 10
         search_status["message"] = "Iniciando coleta de dados..."
         search_status["error"] = None
+        logging.info(f"Status da busca atualizado: {search_status}")
         
         # Construir o comando para executar o script de scraping
         search_query = f"{establishment_type} em {location}"
@@ -43,9 +50,11 @@ def run_scraper(establishment_type, location, max_results):
             "-s", search_query, 
             "-t", str(max_results)
         ]
+        logging.info(f"Comando a ser executado: {command}")
         
         search_status["progress"] = 20
         search_status["message"] = "Executando script de coleta..."
+        logging.info(f"Status da busca atualizado: {search_status}")
         
         # Executar o script como um processo separado
         process = subprocess.Popen(
@@ -54,11 +63,13 @@ def run_scraper(establishment_type, location, max_results):
             stderr=subprocess.PIPE,
             text=True
         )
+        logging.info("Script de coleta iniciado como um processo.")
         
         # Monitorar o progresso
         while True:
             output_line = process.stdout.readline()
             if not output_line and process.poll() is not None:
+                logging.info("Processo de scraping concluído.")
                 break
             
             if "Total Found:" in output_line:
@@ -67,8 +78,9 @@ def run_scraper(establishment_type, location, max_results):
                     search_status["total_found"] = total_found
                     search_status["progress"] = 40
                     search_status["message"] = f"Encontrados {total_found} estabelecimentos..."
-                except:
-                    pass
+                    logging.info(f"Total de estabelecimentos encontrados: {total_found}. Status atualizado: {search_status}")
+                except Exception as e:
+                    logging.error(f"Erro ao processar 'Total Found:' na saída do scraper: {e}")
             
             if "Coletando dados do estabelecimento" in output_line:
                 try:
@@ -78,8 +90,9 @@ def run_scraper(establishment_type, location, max_results):
                     progress = min(40 + int((current / total) * 50), 90)
                     search_status["progress"] = progress
                     search_status["message"] = f"Coletando dados ({current}/{total})..."
-                except:
-                    pass
+                    logging.info(f"Progresso da coleta: {current}/{total}. Status atualizado: {search_status}")
+                except Exception as e:
+                    logging.error(f"Erro ao processar 'Coletando dados do estabelecimento' na saída do scraper: {e}")
         
         # Verificar se houve erro
         stderr_output = process.stderr.read()
@@ -88,25 +101,31 @@ def run_scraper(establishment_type, location, max_results):
             search_status["message"] = "Erro durante a coleta de dados."
             search_status["progress"] = 0
             search_status["is_running"] = False
+            logging.error(f"Erro durante a coleta de dados: {stderr_output}. Status atualizado: {search_status}")
             return
         
         # Ler o arquivo de resultados
         search_status["progress"] = 95
         search_status["message"] = "Processando resultados..."
+        logging.info(f"Processando resultados. Status atualizado: {search_status}")
         
         # Tentar ler o arquivo TXT e converter para estrutura de dados
         try:
             results_file_path = os.path.join(os.path.dirname(__file__), "resultados.txt")
+            logging.info(f"Caminho do arquivo de resultados: {results_file_path}")
             
             if os.path.exists(results_file_path):
                 with open(results_file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
+                logging.info(f"Conteúdo do arquivo resultados.txt lido com sucesso.")
                 
                 # Processar o conteúdo do arquivo TXT para extrair os dados estruturados
                 sections = content.split("------------------------------")
+                logging.info(f"Arquivo resultados.txt dividido em {len(sections)} seções.")
                 
                 # Limpar a lista de resultados
                 search_results.clear()
+                logging.info("Lista de resultados limpa.")
                 
                 # Processar cada seção (cada estabelecimento)
                 for section in sections:
@@ -161,39 +180,48 @@ def run_scraper(establishment_type, location, max_results):
                         search_results.append(result)
             
             search_status["total_found"] = len(search_results)
+            logging.info(f"Total de resultados processados: {len(search_results)}. Status atualizado: {search_status}")
         except Exception as e:
             search_status["error"] = str(e)
             search_status["message"] = "Erro ao processar resultados."
             search_status["progress"] = 0
             search_status["is_running"] = False
+            logging.error(f"Erro ao processar resultados: {e}. Status atualizado: {search_status}")
             return
         
         search_status["progress"] = 100
         search_status["message"] = "Coleta concluída com sucesso!"
         search_status["is_running"] = False
+        logging.info(f"Coleta concluída com sucesso! Status atualizado: {search_status}")
         
     except Exception as e:
         search_status["error"] = str(e)
         search_status["message"] = "Erro durante a coleta de dados."
         search_status["progress"] = 0
         search_status["is_running"] = False
+        logging.error(f"Erro durante a coleta de dados: {e}. Status atualizado: {search_status}")
         traceback.print_exc()
 
 @app.route('/')
 def index():
+    logging.info("Rota '/' acessada.")
     return app.send_static_file('index.html')
 
 @app.route('/search', methods=['POST'])
 def search():
     global search_params, search_status
     
+    logging.info("Rota '/search' acessada.")
+    
     # Obter parâmetros do formulário
     establishment_type = request.form.get('establishment_type')
     location = request.form.get('location')
     max_results = int(request.form.get('max_results', 20))
+    logging.info(f"Parâmetros da busca: Tipo={establishment_type}, Localização={location}, MaxResults={max_results}")
     
     # Validar parâmetros
     if not establishment_type or not location:
+        logging.warning("Tipo de estabelecimento e localização são obrigatórios.")
         return jsonify({
             "error": "Tipo de estabelecimento e localização são obrigatórios."
         }), 400
@@ -204,9 +232,11 @@ def search():
         "location": location,
         "max_results": max_results
     }
+    logging.info(f"Parâmetros da busca armazenados: {search_params}")
     
     # Verificar se já existe uma busca em andamento
     if search_status["is_running"]:
+        logging.warning("Já existe uma busca em andamento.")
         return jsonify({
             "error": "Já existe uma busca em andamento. Aguarde a conclusão."
         }), 400
@@ -218,16 +248,22 @@ def search():
     )
     scraper_thread.daemon = True
     scraper_thread.start()
+    logging.info("Thread do scraper iniciada.")
     
     # Redirecionar para a página de resultados
     return redirect('/results')
 
 @app.route('/results')
 def results():
+    logging.info("Rota '/results' acessada.")
     return app.send_static_file('results.html')
 
 @app.route('/api/results')
 def api_results():
+    logging.info("Rota '/api/results' acessada.")
+    logging.info(f"search_params: {search_params}")
+    logging.info(f"search_status['total_found']: {search_status['total_found']}")
+    logging.info(f"search_results: {search_results}")
     return jsonify({
         "search_params": search_params,
         "total_found": search_status["total_found"],
@@ -236,13 +272,17 @@ def api_results():
 
 @app.route('/api/status')
 def api_status():
+    logging.info("Rota '/api/status' acessada.")
+    logging.info(f"Status da busca: {search_status}")
     return jsonify(search_status)
 
 @app.route('/export/txt')
 def export_txt():
+    logging.info("Rota '/export/txt' acessada.")
     try:
         # Verificar se há resultados
         if not search_results:
+            logging.warning("Nenhum resultado disponível para exportação.")
             return jsonify({"error": "Nenhum resultado disponível para exportação."}), 404
         
         # Criar conteúdo do arquivo TXT
@@ -282,13 +322,16 @@ def export_txt():
         )
     
     except Exception as e:
+        logging.exception("Erro ao exportar para TXT.")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/export/json')
 def export_json():
+    logging.info("Rota '/export/json' acessada.")
     try:
         # Verificar se há resultados
         if not search_results:
+            logging.warning("Nenhum resultado disponível para exportação.")
             return jsonify({"error": "Nenhum resultado disponível para exportação."}), 404
         
         # Criar objeto JSON
@@ -315,13 +358,16 @@ def export_json():
         )
     
     except Exception as e:
+        logging.exception("Erro ao exportar para JSON.")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/export/excel')
 def export_excel():
+    logging.info("Rota '/export/excel' acessada.")
     try:
         # Verificar se há resultados
         if not search_results:
+            logging.warning("Nenhum resultado disponível para exportação.")
             return jsonify({"error": "Nenhum resultado disponível para exportação."}), 404
         
         # Converter para DataFrame
@@ -348,6 +394,7 @@ def export_excel():
         )
     
     except Exception as e:
+        logging.exception("Erro ao exportar para Excel.")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
