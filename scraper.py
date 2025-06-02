@@ -4,6 +4,11 @@ import argparse
 import time
 import os
 import sys
+import logging
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Initialize lists to store scraped data
 names_list=[]
@@ -27,46 +32,53 @@ def extract_data(xpath, data_list, page):
         else:
             data = "N/A"
     except Exception as e:
-        # print(f"Error extracting data for xpath {xpath}: {e}") # Optional: for debugging
+        logging.error(f"Error extracting data for xpath {xpath}: {e}")
         data = "N/A" # Default to N/A on error
     data_list.append(data)
 
 def main():
+    logging.info("Iniciando scraper...")
     with sync_playwright() as p:
         # Launch browser - Prioritize Chrome path for Windows, fallback to Playwright's Chromium
         browser = None
         try:
             # Try launching with specified Windows Chrome path first
             browser = p.chromium.launch(executable_path='C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless=False)
+            logging.info("Navegador Chromium iniciado usando o caminho especificado.")
         except Exception:
             try:
                 # Fallback to Playwright's default Chromium if Chrome path fails or not on Windows
                 browser = p.chromium.launch(headless=False)
+                logging.info("Navegador Chromium iniciado usando o Chromium padrão do Playwright.")
             except Exception as e:
-                print(f"Erro fatal: Não foi possível iniciar o navegador Chromium. Verifique a instalação do Playwright.")
-                print(f"Detalhes do erro: {e}")
+                logging.error(f"Erro fatal: Não foi possível iniciar o navegador Chromium. Verifique a instalação do Playwright. Detalhes do erro: {e}")
                 return # Exit if browser cannot be launched
 
         page = browser.new_page()
+        logging.info("Nova página criada no navegador.")
 
         try:
             page.goto("https://www.google.com/maps", timeout=60000) # Go to base Maps URL
+            logging.info("Navegando para https://www.google.com/maps")
             page.wait_for_timeout(2000) # Allow time for page load
+            logging.info("Página do Google Maps carregada.")
 
             # Search for the place
             page.locator('//input[@id="searchboxinput"]').fill(search_for)
+            logging.info(f"Preenchendo a caixa de pesquisa com '{search_for}'.")
             page.wait_for_timeout(1000) # Wait a bit after filling
             page.keyboard.press("Enter")
+            logging.info("Pressionando 'Enter' para iniciar a busca.")
             print(f"Buscando por: {search_for}...")
 
             # Wait for search results to appear
             results_xpath = '//a[contains(@href, "https://www.google.com/maps/place")]'
             try:
                 page.wait_for_selector(results_xpath, timeout=30000) # Wait up to 30 seconds for results
+                logging.info("Resultados da busca encontrados.")
                 print("Resultados encontrados, iniciando rolagem...")
             except Exception as e:
-                print(f"Não foi possível encontrar resultados para \"{search_for}\" ou a página demorou muito para carregar.")
-                print(f"Detalhes: {e}")
+                logging.error(f"Não foi possível encontrar resultados para \"{search_for}\" ou a página demorou muito para carregar. Detalhes: {e}")
                 browser.close()
                 return
 
@@ -78,14 +90,18 @@ def main():
 
             while scroll_attempts < max_scroll_attempts:
                 page.mouse.wheel(0, 10000) # Scroll down
+                logging.info("Rolando a página para baixo.")
                 page.wait_for_timeout(2000) # Wait for content to load
 
                 current_count = page.locator(results_xpath).count()
+                logging.info(f"Número atual de resultados encontrados: {current_count}")
 
                 if current_count >= total:
+                    logging.info(f"Número desejado de resultados ({total}) alcançado.")
                     print(f"Número desejado de resultados ({total}) alcançado.")
                     break
                 if current_count == previously_counted:
+                    logging.info("Não foram encontrados mais resultados após rolagem.")
                     print(f"Não foram encontrados mais resultados após rolagem. Total: {current_count}")
                     break
                 else:
@@ -94,17 +110,20 @@ def main():
                     scroll_attempts += 1
 
             if scroll_attempts == max_scroll_attempts:
+                logging.info("Máximo de tentativas de rolagem atingido.")
                 print("Máximo de tentativas de rolagem atingido.")
 
             listings = page.locator(results_xpath).all()
             if len(listings) > total:
                  listings = listings[:total] # Limit to the requested total
+            logging.info(f"Total de estabelecimentos encontrados: {len(listings)}")
 
             print(f"Total Found: {len(listings)}")
             print(f"Iniciando coleta de dados para {len(listings)} estabelecimentos...")
 
             # --- Scraping individual listings ---
             for i, listing_link in enumerate(listings):
+                logging.info(f"Coletando dados do estabelecimento {i+1}/{len(listings)}...")
                 print(f"Coletando dados do estabelecimento {i+1}/{len(listings)}...")
                 try:
                     listing = listing_link.locator("xpath=..") # Get the parent element
@@ -113,7 +132,9 @@ def main():
                     name_xpath = '//div[contains(@class, "fontHeadlineLarge")]/span[contains(@class, "fontHeadlineLarge")] | //h1[contains(@class, "DUwDvf")]'
                     try:
                         page.wait_for_selector(name_xpath, timeout=15000) # Wait up to 15 seconds for name
+                        logging.info(f"Detalhes do estabelecimento {i+1} carregados.")
                     except Exception:
+                        logging.warning(f"Demorou muito para carregar detalhes do estabelecimento {i+1}. Pulando.")
                         print(f"  [Aviso] Demorou muito para carregar detalhes do estabelecimento {i+1}. Pulando.")
                         # Attempt to go back or refresh might be needed here in a more robust scraper
                         continue # Skip to the next listing
@@ -193,6 +214,7 @@ def main():
                     extract_data(intro_xpath, intro_list, page)
 
                 except Exception as e:
+                    logging.error(f"Ocorreu um erro ao coletar dados do estabelecimento {i+1}: {e}")
                     print(f"  [Erro] Ocorreu um erro ao coletar dados do estabelecimento {i+1}: {e}")
                     # Append N/A to all lists to maintain alignment if an error occurs for one listing
                     names_list.append("Erro na Coleta")
@@ -213,6 +235,7 @@ def main():
 
             # --- Export to TXT --- Start
             output_filename = "resultados.txt"
+            logging.info(f"Exportando dados para {output_filename}...")
             print(f"\nExportando dados para {output_filename}...")
             try:
                 with open(output_filename, 'w', encoding='utf-8') as f:
@@ -242,16 +265,20 @@ def main():
                         f.write(f"Retirada na Loja: {get_item(in_store_list, i)}\n")
                         f.write(f"Entrega: {get_item(store_del_list, i)}\n")
                         f.write("---"*10 + "\n\n") # Separator
+                logging.info(f"Dados exportados com sucesso para {output_filename}")
                 print(f"Dados exportados com sucesso para {output_filename}")
             except Exception as e:
+                logging.error(f"Erro ao exportar para TXT: {e}")
                 print(f"Erro ao exportar para TXT: {e}")
             # --- Export to TXT --- End
 
         except Exception as e:
+            logging.error(f"Ocorreu um erro inesperado durante a execução: {e}")
             print(f"Ocorreu um erro inesperado durante a execução: {e}")
         finally:
             if browser:
                 browser.close()
+                logging.info("Navegador fechado.")
                 print("Navegador fechado.")
 
 if __name__ == "__main__":
@@ -262,5 +289,6 @@ if __name__ == "__main__":
 
     search_for = args.search
     total = args.total
+    logging.info(f"Termo de busca: {search_for}, Total de resultados: {total}")
 
     main()
