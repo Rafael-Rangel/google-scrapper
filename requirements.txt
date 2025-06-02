@@ -17,7 +17,7 @@ Flask==3.1.0
 Flask-Cors==5.0.0
 fsspec==2025.2.0
 future==1.0.0
-greenlet==3.2.2
+greenlet==2.0.1
 h11==0.14.0
 idna==3.10
 itsdangerous==2.2.0
