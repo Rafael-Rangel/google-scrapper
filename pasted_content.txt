@@ -1,0 +1,136 @@
+O que você quer?
+Uma interface para buscar estabelecimentos (farmácias, supermercados etc.) numa região (tipo Campo Grande, Rio de Janeiro), informando o tipo de empresa, a região e a quantidade de resultados, sem usar a API oficial do Google Maps.
+
+Você mencionou o Firecrawl Simple, que é uma ferramenta para fazer scraping/crawling de sites com Puppeteer/Playwright, e expõe endpoints para isso.
+
+Como fazer isso?
+1. Problema
+Sem usar a API oficial do Google Maps, para buscar estabelecimentos em uma região, você vai ter que:
+
+Fazer scraping da página do Google Maps (web) ou
+
+Usar outra fonte (ex: páginas amarelas, Yelp, TripAdvisor, ou outros diretórios de negócios)
+
+O Google Maps tem proteção contra scraping, como detecção de bot, captchas, etc. Por isso, Firecrawl usa Playwright com proxy, 2captcha, etc. para contornar isso.
+
+2. O que o Firecrawl pode ajudar
+Firecrawl é uma ferramenta para automatizar crawling e scraping de páginas web.
+
+Com ela, você pode programar um "crawler" que vai acessar a página de busca do Google Maps (ex: https://www.google.com/maps/search/farmacias+campo+grande) e extrair as informações da listagem de estabelecimentos.
+
+Firecrawl oferece endpoints como /crawl para rodar crawling e /scrape para extrair conteúdo HTML ou markdown das páginas.
+
+3. Como montar essa interface e fluxo de trabalho
+Passo a passo simplificado:
+Frontend (interface):
+
+Input para: tipo de empresa (farmácia, supermercado, etc.)
+
+Input para: região (campo grande, rio de janeiro, etc.)
+
+Input para: quantidade de resultados
+
+Backend:
+
+Recebe a requisição do frontend.
+
+Monta a URL de busca do Google Maps no formato:
+
+ruby
+Copiar
+Editar
+https://www.google.com/maps/search/{tipo+empresa}+{região}
+Usa o Firecrawl para fazer o crawling e scraping dessa página.
+
+Firecrawl vai usar Puppeteer para carregar a página, aguardar a lista de estabelecimentos carregar e coletar os dados visíveis (nome, endereço, telefone, avaliação, etc.).
+
+Pode limitar a quantidade de resultados conforme solicitado.
+
+Retorna para o frontend:
+
+Um JSON com os estabelecimentos encontrados.
+
+4. O que você precisa ter para isso funcionar
+Firecrawl Simple rodando na sua máquina ou servidor (via docker-compose). Você já mostrou o docker-compose.yaml para isso.
+
+Configurar Playwright-service e Firecrawl-api.
+
+Ter um proxy configurado (para evitar bloqueio do Google).
+
+Opcional: 2captcha para resolver captchas.
+
+5. Código básico para o backend (exemplo em Node.js)
+js
+Copiar
+Editar
+const axios = require('axios');
+
+async function buscarEstabelecimentos(tipo, regiao, limite) {
+  const query = encodeURIComponent(`${tipo} ${regiao}`);
+  const urlBusca = `https://www.google.com/maps/search/${query}`;
+
+  // 1. Inicia crawl na URL do Google Maps
+  const responseCrawl = await axios.post('http://localhost:3002/v1/crawl', {
+    url: urlBusca,
+    limit: limite,
+    scrapeOptions: {
+      formats: ['html']
+    }
+  }, {
+    headers: {
+      'Authorization': 'Bearer fc-YOUR_API_KEY',
+      'Content-Type': 'application/json'
+    }
+  });
+
+  const jobId = responseCrawl.data.id;
+
+  // 2. Aguarda ou checa o status até o crawl estar completo
+  let status = 'pending';
+  let data = null;
+  while (status !== 'completed') {
+    await new Promise(r => setTimeout(r, 3000)); // espera 3 segundos
+    const resStatus = await axios.get(`http://localhost:3002/v1/crawl/${jobId}`, {
+      headers: { 'Authorization': 'Bearer fc-YOUR_API_KEY' }
+    });
+    status = resStatus.data.status;
+    data = resStatus.data.data;
+  }
+
+  // 3. Extrair dados da página HTML (você vai precisar de um parser HTML para buscar os elementos dos estabelecimentos)
+  // Exemplo simples (use cheerio ou jsdom para parsear):
+  // const html = data[0].html
+  // ... extrair nome, endereço, telefone ...
+
+  return data; // ou lista filtrada com os estabelecimentos extraídos
+}
+6. Pontos importantes / desafios
+O Google Maps carrega resultados dinamicamente (infinite scroll, lazy loading). Você precisa que o crawler aguarde a página carregar os resultados e até faça scroll para carregar mais se quiser mais resultados.
+
+O conteúdo extraído estará em HTML. Você precisa usar um parser para extrair só o que interessa (nome da empresa, endereço, telefone, nota, etc.) a partir da estrutura HTML.
+
+Pode ser bloqueado, precisará configurar proxy/anti-bot e 2captcha para manter scraping confiável.
+
+Usar Firecrawl te poupa de montar todo esse Puppeteer + proxy + 2captcha sozinho.
+
+7. Alternativa mais simples: usar outro diretório público
+Se Google Maps estiver difícil, pode pensar em buscar em sites que listam empresas sem restrição, como:
+
+Páginas Amarelas (https://www.paginasamarelas.com.br)
+
+Yelp
+
+Apontador
+
+Etc.
+
+E usar o Firecrawl para pegar dados dessas páginas.
+
+Resumo
+Você monta uma interface que recebe tipo de empresa, região, quantidade.
+
+Backend monta URL do Google Maps e usa Firecrawl para fazer crawling + scraping.
+
+Backend processa o HTML para extrair os estabelecimentos.
+
+Retorna resultado para frontend.
